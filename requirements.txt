@@ -1,0 +1,8 @@
+xgboost
+scikit-learn
+pandas
+chromadb
+langchain
+sentence-transformers
+transformers
+torch
