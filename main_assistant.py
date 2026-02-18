@@ -1,4 +1,5 @@
 import os
+import random
 import joblib
 import ollama
 from langchain_community.vectorstores import Chroma
@@ -34,6 +35,85 @@ safety_filter = pipeline("text-classification", model="unitary/toxic-bert", top_
 
 print("✅ SYSTEM READY.\n")
 
+# --- GREETING / CASUAL RESPONSES ---
+
+GREETING_RESPONSES = [
+    "Hello! 👋 I'm your AI Legal Assistant specializing in Indian law. How can I help you today?",
+    "Hey there! 😊 I'm here to help you with any legal questions about Indian law. What's on your mind?",
+    "Hi! 🙏 Welcome! I can help you understand Indian laws, legal procedures, and your rights. Ask me anything!",
+    "Namaste! 🙏 I'm your legal AI assistant. Feel free to ask me about IPC, BNS, Constitution, or any Indian legal matter.",
+    "Hello! 😊 Great to see you! I'm ready to help with any legal queries — from FIR procedures to property disputes. What do you need?",
+]
+
+FAREWELL_RESPONSES = [
+    "Goodbye! 👋 Take care and don't hesitate to come back if you have more legal questions!",
+    "See you later! 😊 Remember, I'm always here if you need legal guidance.",
+    "Bye! 🙏 Stay safe and feel free to reach out anytime for legal help.",
+    "Take care! 👋 Wishing you the best with everything.",
+]
+
+HOW_ARE_YOU_RESPONSES = [
+    "I'm doing great, thank you for asking! 😊 I'm ready to help you with any legal questions. What can I do for you?",
+    "I'm functioning perfectly! 💪 More importantly, how can I assist you today? Any legal matter you'd like to discuss?",
+    "All good on my end! 😊 Thank you for asking. Now tell me, what legal query do you have?",
+    "I'm well, thanks! 🙏 Always happy to help. Do you have a legal question for me?",
+]
+
+THANKS_RESPONSES = [
+    "You're most welcome! 😊 Happy I could help. Let me know if you have any more questions!",
+    "Glad I could assist! 🙏 Don't hesitate to ask if anything else comes up.",
+    "My pleasure! 😊 I'm always here if you need more legal guidance.",
+    "You're welcome! 🙌 Feel free to come back anytime.",
+]
+
+ABOUT_ME_RESPONSES = [
+    "I'm an AI Legal Assistant 🤖⚖️ trained to help you understand Indian laws! I can help with:\n- 👮 Criminal Law (IPC, BNS, CrPC)\n- 🏠 Family & Civil Law (Property, Divorce, Custody)\n- 💼 Corporate Law (Companies Act, GST, Contracts)\n\nJust ask me a question and I'll do my best to help!",
+]
+
+GENERIC_CASUAL_RESPONSES = [
+    "I appreciate the chat! 😊 I'm here to help with legal questions — feel free to ask me anything about Indian law!",
+    "Nice talking to you! 😊 Whenever you're ready, I can help with any legal queries you might have.",
+    "That's nice! 😊 I'm best at helping with legal matters though — got any questions about Indian law?",
+]
+
+# Keywords for sub-classifying casual messages
+FAREWELL_KEYWORDS = {'bye', 'goodbye', 'see you', 'see ya', 'take care', 'good bye', 'alvida', 'see you later'}
+HOW_ARE_YOU_KEYWORDS = {'how are you', "how's it going", 'how are you doing', "how's your day", 'how is your day', 
+                         'how do you do', "how's everything", 'how is everything', 'kaise ho', 'kya haal'}
+THANKS_KEYWORDS = {'thanks', 'thank you', 'thank you so much', 'thanks a lot', 'appreciate it', 'dhanyavaad', 'shukriya',
+                    'great work', 'well done', 'good job', "you're welcome"}
+ABOUT_ME_KEYWORDS = {'who are you', 'what are you', 'what can you do', 'tell me about yourself', 'what is your name',
+                      'are you a robot', 'are you human', 'are you ai', 'are you a bot'}
+
+
+def handle_casual_interaction(query):
+    """Handle greeting/casual messages with warm, personal responses."""
+    q = query.lower().strip()
+    
+    # Check for farewells
+    for kw in FAREWELL_KEYWORDS:
+        if kw in q:
+            return random.choice(FAREWELL_RESPONSES)
+    
+    # Check for "how are you" type questions
+    for kw in HOW_ARE_YOU_KEYWORDS:
+        if kw in q:
+            return random.choice(HOW_ARE_YOU_RESPONSES)
+    
+    # Check for thanks
+    for kw in THANKS_KEYWORDS:
+        if kw in q:
+            return random.choice(THANKS_RESPONSES)
+    
+    # Check for "who are you" type questions
+    for kw in ABOUT_ME_KEYWORDS:
+        if kw in q:
+            return random.choice(ABOUT_ME_RESPONSES)
+    
+    # Default greeting/casual
+    return random.choice(GREETING_RESPONSES)
+
+
 # --- HELPER FUNCTIONS ---
 
 def get_recommendation(intent, sentiment):
@@ -66,16 +146,78 @@ def main():
             print("👋 Exiting...")
             break
 
-        # --- STEP 0: QUICK GREETING CHECK ---
-        greeting_keywords = ['hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening']
-        if query.lower().strip() in greeting_keywords:
-            print("   [Analysis: Greeting Detected]")
-            print("\n⚖️  **AI Lawyer:**")
-            print("Hello! I am your AI Legal Assistant. I can help you with Indian laws, legal procedures, and rights. How can I assist you today?")
-            print("\n💡 **Next Steps:**\n- Ask about a specific law (e.g., 'What is Section 302 IPC?')\n- Ask for legal procedure (e.g., 'How to file an FIR?')")
+        # --- STEP 1: INTENT CLASSIFICATION ---
+        i_pred = intent_model.predict(intent_vec.transform([query]))[0]
+        
+        # --- SAFETY GUARDRAIL: Override "Casual" for serious topics ---
+        # 1. ROOTS: Check if these exist as substrings (e.g., 'kill' finds 'killed', 'killing')
+        SERIOUS_ROOTS = {
+            'crash', 'accident', 'kill', 'murder', 'rape', 'assault', 'stole', 'robb', 'thief', 'theft',
+            'kidnap', 'police', 'jail', 'prison', 'arrest', 'custody', 'divorce', 'dowry', 'threat', 
+            'harass', 'fraud', 'scam', 'cheat', 'money', 'property', 'death', 'dead', 'died', 'injur', 
+            'crime', 'criminal', 'victim', 'complaint', 'judge', 'verdict', 'sentence', 'bail', 
+            'lawyer', 'legal', 'fir', 'damages', 'compensation'
+        }
+        
+        # 2. EXACT WORDS: Short/ambiguous words that must match exactly
+        SERIOUS_EXACT = {
+            'hit', 'sue', 'law', 'case', 'ban', 'fine', 'tax', 'will', 'hurt', 'lost', 'beat'
+        }
+        
+        query_lower = query.lower()
+        tokens = set(query_lower.split())
+        
+        # Check roots
+        triggered_keyword = None
+        for root in SERIOUS_ROOTS:
+            if root in query_lower:
+                triggered_keyword = root
+                break
+        
+        # Check exact words if no root found
+        if not triggered_keyword:
+            for word in SERIOUS_EXACT:
+                if word in tokens:
+                    triggered_keyword = word
+                    break
+        
+        # Check Phrases
+        if not triggered_keyword:
+            for p in ['hit and run', 'drunk driving', 'domestic violence', 'dowry harassment']:
+                if p in query_lower:
+                    triggered_keyword = p
+                    break
+
+        if i_pred == 3 and triggered_keyword:
+            print(f"   ⚠️  [Guardrail Triggered]: Found '{triggered_keyword}'. Switched to Legal Mode.")
+            
+            # Intelligent Override: Civil vs Criminal
+            CIVIL_KEYWORDS = {'divorce', 'custody', 'money', 'property', 'sue', 'cheat', 'fraud', 'scam', 
+                              'tax', 'will', 'rent', 'agreement', 'contract', 'compensation', 'damages'}
+            
+            if triggered_keyword in CIVIL_KEYWORDS:
+                i_pred = 1  # Family/Civil
+            else:
+                i_pred = 0  # Default to Criminal for safety (police/crash/hurt etc.)
+        
+        intent_label = {0: "Criminal Law 👮", 1: "Family/Civil 🏠", 2: "Corporate 💼", 3: "Greeting/Casual 💬"}[i_pred]
+        print(f"   [Analysis: Intent={intent_label}]")
+
+        # --- STEP 0: GREETING / CASUAL HANDLING ---
+        # If the ML model classifies as Greeting/Casual → handle personally
+        if i_pred == 3:
+            response = handle_casual_interaction(query)
+            print(f"\n⚖️  **AI Lawyer:**")
+            print(response)
+            # Don't pollute chat history with casual messages
             continue
 
-        # --- STEP 0.5: CONTEXTUAL REWRITE (If history exists) ---
+        # --- STEP 1.5: SENTIMENT ---
+        s_pred = sent_model.predict(sent_vec.transform([query]))[0]
+        sentiment_label = {0: "Neutral 😐", 1: "URGENT 🚨", 2: "Positive 🟢"}[s_pred]
+        print(f"   [Analysis: Sentiment={sentiment_label}]")
+
+        # --- STEP 2: CONTEXTUAL REWRITE (If history exists) ---
         search_query = query
         if len(chat_history) > 0:
             print("   🧠 Refining Query with Context...")
@@ -98,25 +240,21 @@ def main():
             except Exception as e:
                 print(f"   [Rewrite Failed]: {e}")
                 
-        # --- STEP 1: SENTIMENT ---
-        # Use the REWRITTEN query for analysis to catch the true intent
-        s_pred = sent_model.predict(sent_vec.transform([search_query]))[0]
-        sentiment_label = {0: "Neutral 😐", 1: "URGENT 🚨", 2: "Positive 🟢"}[s_pred]
-        print(f"   [Analysis: Sentiment={sentiment_label}]")
-
-        # --- STEP 2: INTENT ---
-        i_pred = intent_model.predict(intent_vec.transform([search_query]))[0]
-        intent_label = {0: "Criminal Law 👮", 1: "Family/Civil 🏠", 2: "Corporate 💼"}[i_pred]
-        print(f"   [Analysis: Intent={intent_label}]")
-
         # --- STEP 3: RAG SEARCH (With Threshold) ---
         print("   🔍 Searching Indian Laws...")
         # Search using the DETAILED rewritten query
-        docs = vector_db.similarity_search(search_query, k=1)
+        docs = vector_db.similarity_search(search_query, k=3)
         
+        sources_list = []  # Track sources for citation
         if docs:
-            context = docs[0].page_content
-            source = docs[0].metadata.get('source', 'Legal Doc')
+            # Build context from all retrieved chunks
+            context_parts = []
+            for doc in docs:
+                context_parts.append(doc.page_content)
+                src = doc.metadata.get('source', 'Legal Doc')
+                if src not in sources_list:
+                    sources_list.append(src)
+            context = "\n\n---\n\n".join(context_parts)
         else:
             context = "No specific legal section found."
         
@@ -175,6 +313,14 @@ def main():
         print("\n⚖️  **AI Lawyer:**")
         print(final_answer)
         print(get_recommendation(intent_label, sentiment_label))
+
+        # --- STEP 7: DISPLAY SOURCES ---
+        if sources_list:
+            print("\n📚 **Sources:**")
+            for i, src in enumerate(sources_list, 1):
+                # Clean up the source path for display
+                display_src = os.path.basename(src) if os.path.sep in src or '/' in src else src
+                print(f"   {i}. {display_src}")
 
 if __name__ == "__main__":
     main()
