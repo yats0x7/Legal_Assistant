@@ -29,3 +29,7 @@ models/*.pkl
 # Compressed PDF data (too large for GitHub)
 data/pdf24_compressed*/
 data/pdf24_compressed*.zip
+
+# Large data files
+data/converted-*.json
+data/report1.pdf
