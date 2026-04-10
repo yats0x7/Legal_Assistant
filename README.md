@@ -40,6 +40,3 @@ python main_assistant.py
 ```
 *(There's also a `run_assistant.sh` script if you prefer using that).*
 
-## Contributing
-
-If you want to help out—especially with improving the RAG pipeline, fixing up the prompt quirks, or adding more case law—feel free to open a PR. Just make sure any new data added stays compliant with the 2024 Indian laws.
